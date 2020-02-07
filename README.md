@@ -59,8 +59,8 @@ With:
     * response = KD(H(A1),nonce:H(A2))                      `qop is unspecified`
 
 ## Demonstration
-* Start Server: ```python demo-server.py```
-* Start Client: ```python demo-client.py``` or Using Browser or Postman
+* Start Server: ```python auth_server.py```
+* Start Client: ```python client.py``` or Browser: Chrome/Firefox/Edge or Postman
 
 ## Note:
 SIP challenge-based mechanism for authentication that is based on authentication in HTTP
