@@ -1,7 +1,6 @@
 #!/usr/bin/python
 #
 # HTTP Authentication: Basic and Digest Access Authentication
-# SIP challenge-based mechanism for authentication that is based on authentication in HTTP
 #
 import traceback
 import falcon
@@ -38,14 +37,10 @@ class BasicAuthentication:
 
     def authenticate(self, credentials):
         # auth_header = 'Basic <secret>'
-        result = False, None
-        try:
-            if credentials[6:] in self.secrets:
-                result = True, credentials[6:]
-        except Exception as e:
-            logger([e, traceback.format_exc()])
-        finally:
-            return result
+        if credentials[6:] in self.secrets:
+            return True
+        else:
+            return False
 
 
 class DigestAuthentication:
@@ -53,7 +48,6 @@ class DigestAuthentication:
         self.users = users
         self.realm = realm
         self.txnids = {}
-        self.digest_credentials = {}
 
     def gen_challenge(self):
         # challenge = "Digest (realm|[domain]|nonce|[opaque]|[stale]|[algorithm]|[qop]|[auth-param])"
@@ -65,7 +59,7 @@ class DigestAuthentication:
 
         # generate params for www_auth_header
         nonce = base64.b64encode(self.realm + uuid.uuid4().hex)
-        qop = random.choice(['', 'auth', 'auth-int'])
+        qop = random.choice([''])
         algorithm = random.choice(['', 'MD5', 'MD5-sess'])          # RFC7616 (SHA256, SHA256-sess)
 
         # store nonce data per txn
@@ -80,9 +74,10 @@ class DigestAuthentication:
 
         return challenge
 
-    def _parse_credentials(self, _credentials):
+    @staticmethod
+    def _parse_credentials(_credentials):
         _credentials_pattern = re.compile('([^", ]+) ?[=] ?"?([^", ]+)"?')
-        self.digest_credentials = dict(_credentials_pattern.findall(_credentials))
+        return dict(_credentials_pattern.findall(_credentials))
 
     @staticmethod
     def _H(data):
@@ -117,47 +112,55 @@ class DigestAuthentication:
 
         return a2
 
-    def authenticate(self, method, _credentials, entity_body):
-        result = False, None
-        try:
-            self._parse_credentials(_credentials)
-            _username = self.digest_credentials.get('username')
-            _nonce = self.digest_credentials.get('nonce')
-            _realm = self.digest_credentials.get('realm')
-            _algorithm = self.digest_credentials.get('algorithm', '')
-            _cnonce = self.digest_credentials.get('cnonce', '')
-            _uri = self.digest_credentials.get('uri')
-            _nc = self.digest_credentials.get('nc', '')
-            _qop = self.digest_credentials.get('qop', '')
-            _response = self.digest_credentials.get('response')
+    def response(self, method, username, password, nonce, qop, algorithm, cnonce, nc, uri, entity_body):
 
-            if _username and _realm and _nonce and _uri and _response:
-                if _nonce in self.txnids:
-                    qop = self.txnids[_nonce]['data']['qop']
-                    algorithm = self.txnids[_nonce]['data']['algorithm']
-                    if _realm == self.realm and _qop == qop and _algorithm == algorithm:
+        A1 = self._A1(username, password, nonce, cnonce, algorithm)
+        A2 = self._A2(qop, method, uri, entity_body)
+
+        if qop in ['auth', 'auth-int']:
+            response = self._KD(self._H(A1), nonce +
+                                ':' + nc +
+                                ':' + cnonce +
+                                ':' + qop +
+                                ':' + self._H(A2))
+        else:
+            response = self._KD(self._H(A1), nonce + ':' + self._H(A2))
+
+        return response
+
+    def authenticate(self, method, _credentials, entity_body):
+        result = False
+
+        digest_credentials = self._parse_credentials(_credentials)
+        _username = digest_credentials.get('username')
+        _nonce = digest_credentials.get('nonce')
+        _realm = digest_credentials.get('realm')
+        _algorithm = digest_credentials.get('algorithm', '')
+        _cnonce = digest_credentials.get('cnonce', '')
+        _uri = digest_credentials.get('uri')
+        _nc = digest_credentials.get('nc', '')
+        _qop = digest_credentials.get('qop', '')
+        _response = digest_credentials.get('response')
+
+        if _username and _realm and _nonce and _uri and _response:
+            if _nonce in self.txnids:
+                qop = self.txnids[_nonce]['data']['qop']
+                algorithm = self.txnids[_nonce]['data']['algorithm']
+                if _realm == self.realm and _qop == qop and _algorithm == algorithm:
+                    if (_qop and _cnonce and _nc) or (not _qop and not _cnonce and not _nc):
                         if _username in self.users:
                             password = self.users[_username]
-                            A1 = self._A1(_username, password, _nonce, _cnonce, _algorithm)
-                            A2 = self._A2(qop, method, _uri, entity_body)
 
-                            if _qop in ['auth', 'auth-int']:
-                                response = self._KD(self._H(A1), _nonce +
-                                                    ':' + _nc +
-                                                    ':' + _cnonce +
-                                                    ':' + _qop +
-                                                    ':' + self._H(A2))
-                            else:
-                                response = self._KD(self._H(A1), _nonce + ':' + self._H(A2))
+                            response = self.response(method, _username, password, _nonce, _qop, _algorithm,
+                                                     _cnonce, _nc, _uri, entity_body)
+
                             logger('compare 2 responses ' + response + '|' + _response)
                             if response == _response:
-                                result = True, response
+                                result = True
                                 # clear nonce
                                 self.txnids.pop(_nonce, None)
-        except Exception as e:
-            logger([e, traceback.format_exc()])
-        finally:
-            return result
+
+        return result
 
 
 class Server:
@@ -200,9 +203,9 @@ class Server:
             if authorization_header:
 
                 if self.scheme == 'basic':
-                    verify, _ = self.http_auth.authenticate(authorization_header)
+                    verify = self.http_auth.authenticate(authorization_header)
                 else:
-                    verify, _ = self.http_auth.authenticate(request_method, authorization_header, request_body)
+                    verify = self.http_auth.authenticate(request_method, authorization_header, request_body)
 
                 if verify:
                     status = falcon.HTTP_200
@@ -220,7 +223,7 @@ class Server:
         except Exception as e:
             logger('{} | {}'.format(e, traceback.format_exc()))
             status = falcon.HTTP_500
-            response = 'exception'
+            response = 'failure'
         finally:
             resp.content_type = 'application/json'
             resp.status = status
