@@ -23,8 +23,8 @@ Proxy-Authorization: <authentication-schemes> <credentials>
 ## Authentication schemes
 The general HTTP authentication is used by several authentication schemes. Schemes can differ in security strength and in their availability in client or server software. Common authentication schemes include:
 
-* Basic [RFC7617](https://tools.ietf.org/html/rfc2617)
-* Digest [RFC7616](https://tools.ietf.org/html/rfc2617)
+* Basic [RFC2617](https://tools.ietf.org/html/rfc2617)
+* Digest [RFC2617](https://tools.ietf.org/html/rfc2617)
 * Bearer (will be added later)
 
 ### Basic Authentication Scheme
