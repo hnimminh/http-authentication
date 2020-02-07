@@ -14,8 +14,12 @@ import hashlib
 import random
 from wsgiref.simple_server import make_server
 
+
 DOMAIN = 'github.com'
 USERS = {'admin': 'admin@github', 'minh': 'nguyen-hoang-minh@github'}
+
+LISTEN_ADDR = '0.0.0.0'
+LISTEN_PORT = 8088
 
 
 def logger(message):
@@ -128,15 +132,11 @@ class DigestAuthentication:
             _response = self.digest_credentials.get('response')
 
             if _username and _realm and _nonce and _uri and _response:
-                logger(1)
                 if _nonce in self.txnids:
-                    logger(1)
                     qop = self.txnids[_nonce]['data']['qop']
                     algorithm = self.txnids[_nonce]['data']['algorithm']
                     if _realm == self.realm and _qop == qop and _algorithm == algorithm:
-                        logger(1)
                         if _username in self.users:
-                            logger(1)
                             password = self.users[_username]
                             A1 = self._A1(_username, password, _nonce, _cnonce, _algorithm)
                             A2 = self._A2(qop, method, _uri, entity_body)
@@ -235,9 +235,6 @@ api = application = falcon.API()
 api.add_sink(Server(), r'/*')
 
 if __name__ == '__main__':
-    LISTEN_ADDR = '0.0.0.0'
-    LISTEN_PORT = 8088
     logger("Start HTTP Server {}:{}".format(LISTEN_ADDR, LISTEN_PORT))
-
     httpd = make_server(LISTEN_ADDR, LISTEN_PORT, api)
     httpd.serve_forever()

@@ -6,14 +6,12 @@ import uuid
 import re
 import base64
 import hashlib
+from auth_server import DigestAuthentication, BasicAuthentication, logger
 
-USERS = {'admin': 'admin@github1', 'minh1': 'nguyen-hoang-minh@github'}
+USERS = {'admin': 'admin@github', 'minh': 'nguyen-hoang-minh@github'}
 MODE = {401: {'challenge': 'www-authenticate', 'credentials': 'authorization'},
         407: {'challenge': 'proxy-authenticate', 'credentials': 'proxy-authorization'}}
 
-
-def logger(message):
-    print(message)
 
 
 class Authorization:
@@ -131,6 +129,11 @@ if __name__ == '__main__':
     if _status in [401, 407]:
         challenge = _headers[MODE[_status]['challenge']]
         logger(challenge)
+
+
+
+
+
         auth = Authorization(USERS)
 
         credentials_header_name = MODE[_status]['credentials']
