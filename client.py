@@ -2,11 +2,16 @@ import traceback
 import requests
 import json
 import random
-import uuid
 import re
 import base64
 import hashlib
-from auth_server import USERS, logger
+import time
+
+USERS = {'admin': 'admin@github'}
+
+
+def logger(message):
+    print(message)
 
 
 def parse_scheme(_challenge):
@@ -30,30 +35,81 @@ class DigestAuthorization:
         self.username = username
         self.password = password
         self.txnids = {}
-        self.digest_challenge = {}
-
-    def _parse_challenge(self, _challenge):
-        digest_challenge_pattern = re.compile('([^", ]+) ?[=] ?"?([^", ]+)"?')
-        self.digest_challenge = dict(digest_challenge_pattern.findall(_challenge))
 
     @staticmethod
-    def _H(data, algorithm):
-        h = hashlib.md5(data).hexdigest()
-        if algorithm =
+    def _parse_challenge(_challenge):
+        digest_challenge_pattern = re.compile('([^", ]+) ?[=] ?"?([^", ]+)"?')
+        return dict(digest_challenge_pattern.findall(_challenge))
 
+    @staticmethod
+    def _H(data):
+        return hashlib.md5(data).hexdigest()
 
+    def _KD(self, secret, data):
+        return self._H(secret + ':' + data)
 
-def gen_digest_credential(method, uri, username, password, digest_challenge, entity_body):
-    nonce = digest_challenge.get('nonce')
-    realm = digest_challenge.get('realm')
+    def _A1(self, realm, nonce, cnonce, algorithm):
+        a1 = self.username + ':' + realm + ':' + self.password
+        if algorithm[-5:] == '-sess':
+            a1 = self._H(self.username + ':' + realm + ':' + self.password) + ':' + nonce + ':' + cnonce
 
-    auth = DigestAuthentication({username: password}, realm)
-    auth.txnids[nonce] = {'data': digest_challenge}
+        return a1
 
-    digest_challenge.update({'uri': uri, 'cnonce': uuid.uuid4().hex, 'nc': '0000001', 'response': 'response'})
-    _, response = auth.authenticate(method, digest_challenge, entity_body)
+    def _A2(self, qop, method, uri, entity_body):
+        a2 = method + ':' + uri
+        if qop == 'auth-int':
+            a2 = method + ':' + uri + ':' + self._H(entity_body)
 
-    return response
+        return a2
+
+    def authorize(self, method, uri, _challenge, entity_body):
+        current, ttl = int(time.time()), 60
+        # refresh txinids
+        for txnid in [key for key in self.txnids]:
+            if self.txnids[txnid]['expire'] < current:
+                self.txnids.pop(txnid, None)
+
+        #
+        digest_challenge = self._parse_challenge(_challenge)
+        nonce = digest_challenge.get('nonce')
+        realm = digest_challenge.get('realm')
+        qop = digest_challenge.get('qop', '')
+        algorithm = digest_challenge.get('algorithm', '')
+
+        if nonce and realm:
+            nonce_count = 1
+            if nonce in self.txnids:
+                nonce_count = self.txnids[nonce]['data']['nc'] + 1
+
+            cnonce = base64.b64encode(str(current))
+            nc = '0000000{}'.format(nonce_count)
+            if not qop:
+                cnonce, nc = '', ''
+
+            A1 = self._A1(realm, nonce, cnonce, algorithm)
+            A2 = self._A2(qop, method, uri, entity_body)
+
+            if qop in ['auth', 'auth-int']:
+                response = self._KD(self._H(A1), nonce +
+                                    ':' + nc +
+                                    ':' + cnonce +
+                                    ':' + qop +
+                                    ':' + self._H(A2))
+            else:
+                response = self._KD(self._H(A1), nonce + ':' + self._H(A2))
+
+            digest_challenge.update({'username': self.username, 'cnonce': cnonce,
+                                     'uri': uri, 'nc': nc, 'response': response})
+
+            self.txnids[nonce] = {'expire': current + ttl, 'data': digest_challenge}
+
+            # return credentials
+            credentials = 'Digest username="{}"'.format(self.username)
+            for key, value in digest_challenge.items():
+                if value:
+                    credentials += ', {}="{}"'.format(key, value)
+
+            return credentials
 
 
 def main():
@@ -64,12 +120,18 @@ def main():
         payload = json.dumps({"data": "test authentication"})
         method = 'GET'
 
+        username, password = random_choice(USERS)
+        basic_credentials = gen_basic_credential(username, password)
+        auth = DigestAuthorization(username, password)
+
+        # first request
         r1st = requests.request(method, server + path, headers=headers, data=payload)
         _body = r1st.text
         _status = r1st.status_code
         _headers = r1st.headers
         logger([_status, _headers, _body])
 
+        # authorize
         if _status in [401, 407]:
             server_mode = {
                 401: {'challenge': 'www-authenticate',
@@ -79,21 +141,19 @@ def main():
             }
 
             challenge = _headers[server_mode[_status]['challenge']]
-            scheme, digest_challenge = parse_challenge(challenge)
-
-            username, password = random_choice(USERS)
+            scheme = parse_scheme(challenge)
 
             credentials = 'no-scheme'
             if scheme == 'Basic':
-                credentials = gen_basic_credential(username, password)
+                credentials = basic_credentials
             if scheme == 'Digest':
-                credentials = gen_digest_credential('GET', path, username, password, digest_challenge, payload)
+                credentials = auth.authorize(method, path, challenge, payload)
 
             headers[server_mode[_status]['credentials']] = credentials
             logger(credentials)
 
             r2nd = requests.request(method, server + path, headers=headers, data=payload)
-            logger((r2nd.text, r2nd.status_code, r2nd.headers))
+            logger([r2nd.status_code, r2nd.headers, r2nd.text])
 
     except Exception as e:
         logger('{} | {}'.format(e, traceback.format_exc()))
@@ -101,4 +161,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

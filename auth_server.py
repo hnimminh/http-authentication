@@ -57,14 +57,14 @@ class DigestAuthentication:
 
     def gen_challenge(self):
         # challenge = "Digest (realm|[domain]|nonce|[opaque]|[stale]|[algorithm]|[qop]|[auth-param])"
-        current, ttl = int(time.time()), 12
+        current, ttl = int(time.time()), 60
         # refresh txinids
         for txnid in [key for key in self.txnids]:
             if self.txnids[txnid]['expire'] < current:
                 self.txnids.pop(txnid, None)
 
         # generate params for www_auth_header
-        nonce = uuid.uuid4().hex
+        nonce = base64.b64encode(self.realm + uuid.uuid4().hex)
         qop = random.choice(['', 'auth', 'auth-int'])
         algorithm = random.choice(['', 'MD5', 'MD5-sess'])          # RFC7616 (SHA256, SHA256-sess)
 
@@ -152,8 +152,8 @@ class DigestAuthentication:
                             logger('compare 2 responses ' + response + '|' + _response)
                             if response == _response:
                                 result = True, response
-            # clear nonce
-            self.txnids.pop(_nonce, None)
+                                # clear nonce
+                                self.txnids.pop(_nonce, None)
         except Exception as e:
             logger([e, traceback.format_exc()])
         finally:
