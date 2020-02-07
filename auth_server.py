@@ -59,7 +59,7 @@ class DigestAuthentication:
 
         # generate params for www_auth_header
         nonce = base64.b64encode(self.realm + uuid.uuid4().hex)
-        qop = random.choice([''])
+        qop = random.choice(['', 'auth', 'auth-int'])
         algorithm = random.choice(['', 'MD5', 'MD5-sess'])          # RFC7616 (SHA256, SHA256-sess)
 
         # store nonce data per txn
