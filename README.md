@@ -69,3 +69,9 @@ SIP challenge-based mechanism for authentication that is based on authentication
 * https://developer.mozilla.org/en-US/docs/Web/HTTP/Authentication
 * https://developer.mozilla.org/en-US/docs/Web/HTTP/Status
 * https://tools.ietf.org/html/rfc2617
+
+## AUTHOR
+
+**Minh Minh** - *Initial work*)
+
+---
